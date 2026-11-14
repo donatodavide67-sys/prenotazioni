@@ -1,0 +1,1055 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Prenotazioni B&B</title>
+<meta name="theme-color" content="#2f5d50">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Prenotazioni">
+<script>
+  // ponte tra l'app e Firebase: l'app chiede "db", "user", "downloads" e aspetta il login
+  window.__fb = {}; window.__ready = new Promise(r => window.__fb.resolve = r);
+  window.claude = { use: name => window.__ready.then(api => api[name] || null) };
+</script>
+<script type="module">
+  import { firebaseConfig } from "./firebase-config.js";
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js";
+  import { initializeFirestore, persistentLocalCache, persistentMultipleTabManager, collection, doc, onSnapshot, setDoc, updateDoc, deleteDoc }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js";
+  import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, signOut, sendPasswordResetEmail }
+    from "https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js";
+
+  const $ = s => document.querySelector(s);
+  const login = $("#login");
+  if (!firebaseConfig || !firebaseConfig.apiKey || /INCOLLA/.test(firebaseConfig.apiKey)) {
+    login.hidden = false;
+    $("#loginForm").innerHTML = "<h2>Configurazione mancante</h2><p>Apri il file <b>firebase-config.js</b> e incolla i dati del tuo progetto Firebase (vedi istruzioni).</p>";
+    throw new Error("firebase-config.js non compilato");
+  }
+  const app = initializeApp(firebaseConfig);
+  let fs;
+  try { fs = initializeFirestore(app, { localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() }) }); }
+  catch { fs = initializeFirestore(app, {}); }
+  const auth = getAuth(app);
+
+  const mapErr = e => { const c = (e && e.code) || ""; return { code: c === "permission-denied" ? "invalid_argument" : c === "resource-exhausted" ? "resource_exhausted" : "unavailable", message: e && e.message }; };
+  // una scrittura offline resta in coda e parte da sola al ritorno della rete: non blocchiamo l'interfaccia
+  const w = p => Promise.race([p.catch(e => { throw mapErr(e); }), new Promise(r => setTimeout(r, 2500))]);
+  const snapDoc = s => ({ id: s.id, exists: s.exists(), data: () => s.data(), metadata: { fromCache: s.metadata.fromCache, hasPendingWrites: s.metadata.hasPendingWrites } });
+  const docApi = ref => ({
+    id: ref.id, path: ref.path,
+    set: d => w(setDoc(ref, d)), update: d => w(updateDoc(ref, d)), delete: () => w(deleteDoc(ref)),
+    onSnapshot: (next, err) => onSnapshot(ref, s => next(snapDoc(s)), e => err && err(mapErr(e)))
+  });
+  const collApi = path => { const c = collection(fs, path); return {
+    path, doc: id => docApi(id ? doc(c, id) : doc(c)),
+    onSnapshot: (next, err) => onSnapshot(c, s => next({ docs: s.docs.map(snapDoc), size: s.size, empty: s.empty, metadata: { fromCache: s.metadata.fromCache, hasPendingWrites: s.metadata.hasPendingWrites } }), e => err && err(mapErr(e)))
+  }; };
+  const downloads = { save: async ({ filename, data }) => {
+    const type = filename.endsWith(".json") ? "application/json" : "text/csv;charset=utf-8";
+    const url = URL.createObjectURL(new Blob([data], { type }));
+    const a = Object.assign(document.createElement("a"), { href: url, download: filename });
+    document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(url), 2000);
+  } };
+
+  let started = false;
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      login.hidden = true;
+      $("#whoami").textContent = user.email;
+      if (!started) { started = true; window.__fb.resolve({ db: { collection: collApi, doc: p => docApi(doc(fs, p)) }, user: { can: async () => true }, downloads }); }
+    } else {
+      if (started) { location.reload(); return; }
+      login.hidden = false;
+      setTimeout(() => $("#lEmail").focus(), 50);
+    }
+  });
+  $("#loginForm").addEventListener("submit", async e => {
+    e.preventDefault();
+    const msg = $("#lMsg"); msg.textContent = "Accesso…"; msg.className = "msg";
+    try { await signInWithEmailAndPassword(auth, $("#lEmail").value.trim(), $("#lPass").value); msg.textContent = ""; }
+    catch (err) { msg.className = "msg err"; msg.textContent = /network/.test(err.code) ? "Nessuna connessione." : "Email o password sbagliate."; }
+  });
+  $("#lReset").onclick = async () => {
+    const em = $("#lEmail").value.trim(), msg = $("#lMsg");
+    if (!em) { msg.className = "msg err"; msg.textContent = "Scrivi prima la tua email."; return; }
+    try { await sendPasswordResetEmail(auth, em); msg.className = "msg ok"; msg.textContent = "Ti ho mandato una mail per reimpostare la password."; }
+    catch { msg.className = "msg err"; msg.textContent = "Invio non riuscito."; }
+  };
+  $("#logoutBtn").onclick = () => signOut(auth);
+  if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+</script>
+
+<style>
+:root{
+  --bg:#f6f5f2; --panel:#fff; --ink:#1f2328; --muted:#6b7078; --line:#e3e1dc; --accent:#2f5d50;
+  --weekend:#efece6; --today:#fff4d6;
+  --diretta:#3b8a5a; --booking:#2b5fb4; --airbnb:#d9485f; --altro:#7a7f87; --blocco:#9aa0a6;
+  --cellW:44px; --roomW:96px; --rowH:46px;
+}
+*{box-sizing:border-box}
+html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+button{font:inherit;cursor:pointer}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+header h1{font-size:17px;margin:0 8px 0 0;font-weight:650}
+.tabs{display:flex;gap:4px;background:var(--bg);padding:3px;border-radius:9px}
+.tabs button{border:0;background:transparent;padding:6px 12px;border-radius:7px;color:var(--muted)}
+.tabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
+.spacer{flex:1}
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:8px;color:var(--ink)}
+.btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.danger{color:#b3261e;border-color:#f0c9c6}
+.btn:disabled{opacity:.5;cursor:default}
+main{padding:12px 14px 40px;max-width:1400px;margin:0 auto}
+.status{font-size:13px;color:var(--muted);margin:0 0 10px}
+.status.warn{color:#8a5a00}
+.nav{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
+.nav .month{font-weight:600;margin-left:6px;text-transform:capitalize}
+.legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-left:auto}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--c)}
+
+/* Calendar */
+.calwrap{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;max-height:calc(100vh - 190px)}
+.cal{position:relative;display:grid;min-width:max-content}
+.cal .hrow,.cal .row{display:grid;grid-template-columns:var(--roomW) repeat(var(--days),var(--cellW))}
+.cal .hrow{position:sticky;top:0;z-index:6;background:var(--panel)}
+.cal .corner,.cal .rname{position:sticky;left:0;z-index:5;background:var(--panel);border-right:1px solid var(--line)}
+.cal .corner{z-index:7;border-bottom:1px solid var(--line)}
+.cal .dh{border-bottom:1px solid var(--line);border-left:1px solid var(--line);text-align:center;padding:4px 0;font-size:11px;color:var(--muted);line-height:1.2}
+.cal .dh b{display:block;font-size:14px;color:var(--ink)}
+.cal .dh.we{background:var(--weekend)} .cal .dh.td{background:var(--today)}
+.cal .row{position:relative;height:var(--rowH)}
+.cal .rname{display:flex;align-items:center;padding:0 10px;font-weight:600;font-size:14px;border-bottom:1px solid var(--line);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cal .cell{border-left:1px solid var(--line);border-bottom:1px solid var(--line)}
+.cal .cell.we{background:var(--weekend)} .cal .cell.td{background:var(--today)}
+.cal .cell:hover{background:#e9f1ee}
+.bar{position:absolute;top:7px;height:calc(var(--rowH) - 14px);border-radius:7px;color:#fff;font-size:12px;padding:3px 8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;z-index:3;box-shadow:0 1px 2px rgba(0,0,0,.15);line-height:1.15;display:flex;flex-direction:column;justify-content:center;border:0;text-align:left}
+.bar small{opacity:.85;font-size:10.5px}
+.bar.cut-l{border-top-left-radius:0;border-bottom-left-radius:0}
+.bar.cut-r{border-top-right-radius:0;border-bottom-right-radius:0}
+.bar.conflict{outline:2px solid #ffb300;outline-offset:1px}
+
+.moveban{position:sticky;top:62px;z-index:15;display:flex;gap:8px;align-items:center;flex-wrap:wrap;background:#1f3d35;color:#fff;border-radius:10px;padding:10px 12px;margin-bottom:10px;box-shadow:0 4px 14px rgba(0,0,0,.18)}
+.moveban[hidden]{display:none}
+.moveban .grow{flex:1;min-width:200px;font-size:14px}
+.moveban .err{color:#ffd27a}
+body.moving .cal .cell:hover{background:#cfe6dc;cursor:copy}
+body.moving .bar{opacity:.55}
+body.moving .bar.picked{opacity:1;outline:3px dashed #1f3d35;outline-offset:1px}
+.bar{-webkit-user-select:none;user-select:none;-webkit-touch-callout:none}
+.bar.dragging{opacity:.3}
+.bar.ghost{z-index:100;opacity:.92;box-shadow:0 8px 24px rgba(0,0,0,.3);transition:none}
+body.dragmode,body.dragmode *{cursor:grabbing!important;-webkit-user-select:none;user-select:none}
+.slot{position:absolute;z-index:4;border:2px dashed #2e7d32;background:rgba(46,125,50,.12);border-radius:7px;display:none;pointer-events:none;font-size:11px;color:#1b5e20;padding:2px 6px;white-space:nowrap;overflow:visible}
+.slot.bad{border-color:#c62828;background:rgba(198,40,40,.12);color:#b71c1c}
+.cal .row.park .rname{font-style:italic;color:#5a4a1f;background:#fbf6e9}
+.cal .row.park .cell{background:repeating-linear-gradient(45deg,#fbf6e9,#fbf6e9 6px,#f5eedb 6px,#f5eedb 12px)}
+.roomlist input[type=color]{width:52px;flex:none;padding:2px;height:38px}
+.roomlist .r.src input[type=text]{flex:1}
+.roomlist .park-l{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--muted);white-space:nowrap}
+.roomlist .park-l input{width:auto}
+#login{position:fixed;inset:0;z-index:100;background:var(--bg);display:flex;align-items:center;justify-content:center;padding:20px}
+#login[hidden]{display:none}
+#loginForm{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:22px;width:100%;max-width:360px;box-shadow:0 6px 24px rgba(0,0,0,.06)}
+#loginForm h2{margin:0 0 4px;font-size:20px}
+#loginForm p{color:var(--muted);margin:0 0 16px;font-size:14px}
+.linkbtn{background:none;border:0;color:var(--accent);padding:0;font-size:13px;text-decoration:underline}
+.empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:28px;text-align:center}
+.empty h2{margin:0 0 6px;font-size:18px}
+.empty p{color:var(--muted);margin:0 0 16px}
+
+/* List */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px}
+.card h3{margin:0 0 8px;font-size:14px;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.03em}
+.item{display:flex;gap:10px;align-items:center;padding:8px 0;border-top:1px solid var(--line);cursor:pointer}
+.item:first-of-type{border-top:0}
+.dot{width:10px;height:10px;border-radius:50%;flex:none}
+.item .meta{font-size:12.5px;color:var(--muted)}
+.item .grow{flex:1;min-width:0}
+.item .grow div{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Settings */
+.section{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:14px 16px;margin-bottom:14px}
+.section h2{font-size:16px;margin:0 0 4px}
+.section p.hint{color:var(--muted);font-size:13px;margin:0 0 12px}
+.roomlist{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.roomlist .r{display:flex;gap:6px;align-items:center}
+.roomlist input{flex:1}
+input,select,textarea{font:inherit;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;color:var(--ink);width:100%}
+textarea{min-height:64px;resize:vertical}
+label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.field{margin-bottom:10px}
+.inline{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.inline input[type=number]{width:90px}
+.check{display:flex;gap:8px;align-items:flex-start;font-size:13.5px;color:var(--ink)}
+.check input{width:auto;margin-top:3px}
+.msg{font-size:13px;margin-top:8px}
+.msg.ok{color:#2e7d32}.msg.err{color:#b3261e}
+
+/* Modal */
+.overlay{position:fixed;inset:0;background:rgba(20,22,25,.45);display:none;align-items:flex-end;justify-content:center;z-index:50}
+.overlay.on{display:flex}
+.modal{background:var(--panel);width:100%;max-width:520px;max-height:92vh;overflow:auto;border-radius:14px 14px 0 0;padding:16px 16px 18px}
+@media(min-width:640px){.overlay{align-items:center}.modal{border-radius:14px}}
+.modal h2{margin:0 0 12px;font-size:17px}
+.modal .actions{display:flex;gap:8px;justify-content:flex-end;margin-top:14px;flex-wrap:wrap}
+.modal .actions .left{margin-right:auto}
+.warnbox{background:#fff4d6;border:1px solid #f3d27a;border-radius:8px;padding:8px 10px;font-size:13px;margin-top:6px;display:none}
+.nights{font-size:13px;color:var(--muted);margin:-4px 0 10px}
+
+@media(max-width:600px){
+  :root{--cellW:38px;--roomW:78px;--rowH:44px}
+  header h1{font-size:15px}
+  .grid2{grid-template-columns:1fr}
+  .legend{margin-left:0;width:100%}
+}
+</style>
+</head>
+<body>
+<div id="login" hidden>
+  <form id="loginForm" autocomplete="on">
+    <h2>🛏️ Prenotazioni</h2>
+    <p>Accedi per vedere il calendario.</p>
+    <div class="field"><label for="lEmail">Email</label><input id="lEmail" type="email" autocomplete="username" required></div>
+    <div class="field"><label for="lPass">Password</label><input id="lPass" type="password" autocomplete="current-password" required></div>
+    <button class="btn primary" style="width:100%;margin-top:4px">Entra</button>
+    <div style="margin-top:12px;text-align:center"><button type="button" class="linkbtn" id="lReset">Password dimenticata?</button></div>
+    <div class="msg" id="lMsg"></div>
+  </form>
+</div>
+<header>
+  <h1>🛏️ Prenotazioni</h1>
+  <div class="tabs" role="tablist">
+    <button data-view="cal" class="on">Calendario</button>
+    <button data-view="list">Arrivi/Partenze</button>
+    <button data-view="settings">Impostazioni</button>
+  </div>
+  <div class="spacer"></div>
+  <button class="btn primary" id="newBtn">+ Prenotazione</button>
+</header>
+
+<main>
+  <p class="status" id="status">Caricamento dati…</p>
+  <div class="moveban" id="moveBan" hidden>
+    <div class="grow" id="moveText"></div>
+    <button class="btn primary" id="moveForce" hidden>Sposta comunque</button>
+    <button class="btn" id="moveCancel">Annulla</button>
+  </div>
+
+  <section id="view-cal">
+    <div class="nav">
+      <button class="btn" id="prevBtn" aria-label="Indietro">◀</button>
+      <button class="btn" id="todayBtn">Oggi</button>
+      <button class="btn" id="nextBtn" aria-label="Avanti">▶</button>
+      <input type="date" id="jumpDate" style="width:auto">
+      <span class="month" id="monthLabel"></span>
+      <div class="legend" id="legend"></div>
+    </div>
+    <div id="calHost"></div>
+  </section>
+
+  <section id="view-list" hidden></section>
+
+  <section id="view-settings" hidden>
+    <div class="section">
+      <h2>Camere</h2>
+      <p class="hint">Dai a ogni camera il nome che usi tu. L'ordine qui è l'ordine nel calendario.</p>
+      <div class="roomlist" id="roomList"></div>
+      <div class="inline">
+        <input id="newRoomName" placeholder="Nome nuova camera (es. Camera 1)" style="flex:1;min-width:180px">
+        <button class="btn" id="addRoomBtn">Aggiungi</button>
+      </div>
+      <div class="inline" style="margin-top:10px">
+        <button class="btn" id="addParkBtn">📦 Aggiungi riga di appoggio</button>
+        <span style="font-size:13px;color:var(--muted)">Per "Salvataggio", impegni, ecc.: non è una camera, ci puoi parcheggiare più prenotazioni anche sovrapposte.</span>
+      </div>
+      <div class="inline" style="margin-top:10px">
+        <span style="font-size:13px;color:var(--muted)">Oppure crea in un colpo</span>
+        <input type="number" id="bulkN" min="1" max="30" value="8">
+        <span style="font-size:13px;color:var(--muted)">camere numerate</span>
+        <button class="btn" id="bulkBtn">Crea</button>
+      </div>
+      <div class="msg" id="roomMsg"></div>
+    </div>
+
+    <div class="section">
+      <h2>Provenienze e colori</h2>
+      <p class="hint">Le voci che scegli in ogni prenotazione, ognuna con il suo colore. Puoi rinominarle, cambiare colore, aggiungerne o toglierne. Se rinomini una voce, le prenotazioni che la usano si aggiornano da sole. "Chiusa" serve per bloccare una camera senza ospite.</p>
+      <div class="roomlist" id="srcList"></div>
+      <div class="inline">
+        <input id="newSrcName" placeholder="Nuova voce (es. Expedia, Amici, Pulizie…)" style="flex:1;min-width:180px">
+        <input type="color" id="newSrcColor" value="#8e44ad" style="width:52px;padding:2px">
+        <button class="btn" id="addSrcBtn">Aggiungi</button>
+      </div>
+      <div class="msg" id="srcMsg"></div>
+    </div>
+
+    <div class="section">
+      <h2>Importa da Booking / Airbnb (file .ics)</h2>
+      <p class="hint">Dall'extranet di Booking (Tariffe e disponibilità → Sincronizza calendari → Esporta) o da Airbnb (Calendario → Disponibilità → Esporta calendario) copi il link, lo apri nel browser: scarica un file .ics. Caricalo qui scegliendo la camera a cui si riferisce. Puoi ripeterlo quando vuoi: le prenotazioni già importate vengono aggiornate, non duplicate.</p>
+      <div class="grid2">
+        <div class="field"><label>Camera</label><select id="icsRoom"></select></div>
+        <div class="field"><label>Portale</label>
+          <select id="icsSource"></select></div>
+      </div>
+      <div class="field"><label>File .ics</label><input type="file" id="icsFile" accept=".ics,text/calendar"></div>
+      <label class="check"><input type="checkbox" id="icsPrune" checked> Elimina le prenotazioni importate prima da questo portale per questa camera che nel file non ci sono più (cancellazioni)</label>
+      <div style="margin-top:10px"><button class="btn primary" id="icsBtn">Importa</button></div>
+      <div class="msg" id="icsMsg"></div>
+    </div>
+
+    <div class="section">
+      <h2>Account</h2>
+      <p class="hint">Sei collegato come <b id="whoami"></b>. L'accesso resta memorizzato su questo dispositivo.</p>
+      <button class="btn" id="logoutBtn">Esci</button>
+    </div>
+
+    <div class="section">
+      <h2>Backup</h2>
+      <p class="hint">Scarica tutte le camere e prenotazioni. Così i dati restano sempre tuoi, qualunque cosa succeda.</p>
+      <div class="inline">
+        <button class="btn" id="backupJson">Scarica backup (JSON)</button>
+        <button class="btn" id="backupCsv">Scarica elenco (CSV per Excel)</button>
+        <button class="btn" id="copyCsv">Copia elenco</button>
+      </div>
+      <div class="inline" style="margin-top:12px">
+        <span style="font-size:13px;color:var(--muted)">Ripristina da un backup (JSON):</span>
+        <input type="file" id="restoreFile" accept=".json,application/json" style="flex:1;min-width:200px">
+        <button class="btn" id="restoreBtn">Ripristina</button>
+      </div>
+      <div class="msg" id="backupMsg"></div>
+    </div>
+  </section>
+</main>
+
+<div class="overlay" id="ov">
+  <form class="modal" id="form" autocomplete="off">
+    <h2 id="formTitle">Nuova prenotazione</h2>
+    <div class="field"><label>Ospite</label><input id="fGuest" placeholder="Nome e cognome (facoltativo per chiusure e impegni)"></div>
+    <div class="grid2">
+      <div class="field"><label>Camera</label><select id="fRoom"></select></div>
+      <div class="field"><label>Provenienza</label>
+        <select id="fSource"></select></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Arrivo</label><input type="date" id="fIn" required></div>
+      <div class="field"><label>Partenza</label><input type="date" id="fOut" required></div>
+    </div>
+    <div class="nights" id="fNights"></div>
+    <div class="grid2">
+      <div class="field"><label>Persone</label><input type="number" id="fPax" min="1" max="20" inputmode="numeric"></div>
+      <div class="field"><label>Telefono</label><input id="fPhone" inputmode="tel"></div>
+    </div>
+    <div class="grid2">
+      <div class="field"><label>Prezzo totale (€)</label><input type="number" id="fPrice" min="0" step="0.01" inputmode="decimal"></div>
+      <div class="field"><label>Acconto ricevuto (€)</label><input type="number" id="fDeposit" min="0" step="0.01" inputmode="decimal"></div>
+    </div>
+    <div class="field"><label>Note</label><textarea id="fNotes"></textarea></div>
+    <div class="warnbox" id="fWarn"></div>
+    <div class="msg err" id="fErr"></div>
+    <div class="actions">
+      <button type="button" class="btn danger left" id="fDelete" hidden>Elimina</button>
+      <button type="button" class="btn" id="fMove" hidden>✂️ Sposta</button>
+      <button type="button" class="btn" id="fCancel">Annulla</button>
+      <button type="submit" class="btn primary" id="fSave">Salva</button>
+    </div>
+  </form>
+</div>
+
+<script>
+(() => {
+  // ---------- helpers ----------
+  const $ = s => document.querySelector(s);
+  const DAY = 86400000;
+  const toKey = d => d.toISOString().slice(0,10);
+  const fromKey = k => new Date(k + "T00:00:00Z");
+  const addDays = (k, n) => toKey(new Date(fromKey(k).getTime() + n*DAY));
+  const diffDays = (a, b) => Math.round((fromKey(b) - fromKey(a)) / DAY);
+  const todayKey = () => { const d = new Date(); return toKey(new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()))); };
+  const fmtDay = k => fromKey(k).toLocaleDateString("it-IT", {weekday:"short", day:"numeric", month:"short", timeZone:"UTC"});
+  const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const DEFAULT_SOURCES = [
+    {name:"Diretta", color:"#3b8a5a"}, {name:"Booking", color:"#2b5fb4"}, {name:"Airbnb", color:"#d9485f"},
+    {name:"Altro", color:"#7a7f87"}, {name:"Chiusa", color:"#9aa0a6"}];
+  let sources = DEFAULT_SOURCES;
+  const colorOf = name => (sources.find(s => s.name === name) || {}).color || "#7a7f87";
+  const inkOn = hex => { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return "#fff";
+    const n = parseInt(m[1], 16), r = n>>16, g = (n>>8)&255, b = n&255; return (0.299*r + 0.587*g + 0.114*b) > 160 ? "#1f2328" : "#fff"; };
+  const hash = s => { let h = 2166136261; for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h>>>0).toString(36); };
+  const money = n => (n || n === 0) ? Number(n).toLocaleString("it-IT",{style:"currency",currency:"EUR"}) : "";
+
+  // ---------- state ----------
+  let db = null, downloads = null;
+  let rooms = [];      // [{id, name, order}]
+  let bookings = [];   // [{id, ...}]
+  let gotRooms = false, gotBookings = false;
+  let canWrite = true;
+  let start = addDays(todayKey(), -3);
+  const DAYS = 35;
+  let editingId = null;
+
+  const statusEl = $("#status");
+  function setStatus(text, warn){ statusEl.textContent = text || ""; statusEl.classList.toggle("warn", !!warn); statusEl.hidden = !text; }
+
+  // ---------- tabs ----------
+  let view = "cal";
+  document.querySelectorAll(".tabs button").forEach(b => b.onclick = () => {
+    view = b.dataset.view;
+    document.querySelectorAll(".tabs button").forEach(x => x.classList.toggle("on", x === b));
+    ["cal","list","settings"].forEach(v => $("#view-"+v).hidden = v !== view);
+    render();
+  });
+
+  // ---------- render ----------
+  function roomName(id){ const r = rooms.find(r => r.id === id); return r ? r.name : "(camera eliminata)"; }
+
+  function overlaps(a, b){ return a.room === b.room && a.checkin < b.checkout && b.checkin < a.checkout; }
+  const isParking = id => { const r = rooms.find(r => r.id === id); return !!(r && r.parking); };
+  function conflictIds(){
+    const ids = new Set();
+    for (let i=0;i<bookings.length;i++) for (let j=i+1;j<bookings.length;j++)
+      if (!isParking(bookings[i].room) && overlaps(bookings[i], bookings[j])) { ids.add(bookings[i].id); ids.add(bookings[j].id); }
+    return ids;
+  }
+
+  function renderCal(){
+    const host = $("#calHost");
+    const end = addDays(start, DAYS);
+    $("#jumpDate").value = start;
+    const m1 = fromKey(start).toLocaleDateString("it-IT",{month:"long",year:"numeric",timeZone:"UTC"});
+    const m2 = fromKey(addDays(end,-1)).toLocaleDateString("it-IT",{month:"long",year:"numeric",timeZone:"UTC"});
+    $("#monthLabel").textContent = m1 === m2 ? m1 : m1 + " – " + m2;
+
+    if (!rooms.length){
+      host.innerHTML = gotRooms
+        ? `<div class="empty"><h2>Iniziamo dalle camere</h2><p>Aggiungi le camere della struttura, poi potrai inserire le prenotazioni.</p><button class="btn primary" id="goSettings">Aggiungi camere</button></div>`
+        : "";
+      const g = $("#goSettings"); if (g) g.onclick = () => document.querySelector('.tabs button[data-view=settings]').click();
+      return;
+    }
+    const tk = todayKey();
+    const days = Array.from({length:DAYS}, (_,i) => addDays(start, i));
+    const cls = k => { const wd = fromKey(k).getUTCDay(); return (wd===0||wd===6?" we":"") + (k===tk?" td":""); };
+    let html = `<div class="cal" style="--days:${DAYS}"><div class="hrow"><div class="corner"></div>`;
+    for (const k of days){
+      const d = fromKey(k);
+      html += `<div class="dh${cls(k)}">${d.toLocaleDateString("it-IT",{weekday:"short",timeZone:"UTC"})}<b>${d.getUTCDate()}</b></div>`;
+    }
+    html += `</div>`;
+    const conf = conflictIds();
+    const cw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--cellW")) || 44;
+    const rw = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--roomW")) || 96;
+    const rh = parseFloat(getComputedStyle(document.documentElement).getPropertyValue("--rowH")) || 46;
+    for (const r of rooms){
+      // corsie: prenotazioni sovrapposte (es. nella riga di appoggio) vanno una sotto l'altra
+      const rb = bookings.filter(b => b.room === r.id && b.checkout > start && b.checkin < end)
+                         .sort((a,b) => a.checkin.localeCompare(b.checkin) || a.checkout.localeCompare(b.checkout));
+      const laneEnds = [], laneOf = {};
+      for (const b of rb){
+        let l = laneEnds.findIndex(e => e <= b.checkin);
+        if (l < 0){ l = laneEnds.length; laneEnds.push(b.checkout); } else laneEnds[l] = b.checkout;
+        laneOf[b.id] = l;
+      }
+      const H = Math.max(1, laneEnds.length) * rh;
+      html += `<div class="row${r.parking ? " park" : ""}" style="height:${H}px"><div class="rname" title="${esc(r.name)}">${r.parking ? "📦 " : ""}${esc(r.name)}</div>`;
+      for (const k of days) html += `<div class="cell${cls(k)}" data-room="${esc(r.id)}" data-day="${k}"></div>`;
+      for (const b of rb){
+        const s = diffDays(start, b.checkin), e = diffDays(start, b.checkout);
+        const cutL = s < 0, cutR = e > DAYS;
+        const left = rw + (cutL ? 0 : s*cw);
+        const right = rw + (cutR ? DAYS*cw : e*cw);
+        const width = Math.max(right - left - 2, 14);
+        const nights = diffDays(b.checkin, b.checkout);
+        const label = b.guest || (b.source === "Chiusa" ? "Chiusa" : b.source);
+        html += `<button type="button" class="bar${moving && moving.id === b.id ? " picked" : ""}${cutL?" cut-l":""}${cutR?" cut-r":""}${conf.has(b.id)?" conflict":""}" data-id="${esc(b.id)}" style="left:${left+1}px;width:${width}px;top:${laneOf[b.id]*rh + 7}px;background:${colorOf(b.source)};color:${inkOn(colorOf(b.source))}" title="${esc(label)} · ${fmtDay(b.checkin)} → ${fmtDay(b.checkout)}${conf.has(b.id)?" · ATTENZIONE: sovrapposta":""}">${esc(label)}<small>${nights} nott${nights===1?"e":"i"}${b.pax?" · "+b.pax+" pers.":""}</small></button>`;
+      }
+      html += `</div>`;
+    }
+    html += `</div>`;
+    const old = host.firstElementChild;
+    const prevL = old ? old.scrollLeft : null, prevT = old ? old.scrollTop : null;
+    host.innerHTML = `<div class="calwrap">${html}</div>`;
+    const wrap = host.firstElementChild;
+    if (prevL !== null){ wrap.scrollLeft = prevL; wrap.scrollTop = prevT; }
+    attachDrag(wrap, {cw, rw});
+    wrap.onclick = ev => {
+      if (justDragged){ justDragged = false; return; }
+      if (moving){
+        const cell = document.elementsFromPoint(ev.clientX, ev.clientY).find(el => el.classList && el.classList.contains("cell"));
+        if (cell) tryMove(cell.dataset.room, cell.dataset.day, false);
+        return;
+      }
+      const bar = ev.target.closest(".bar");
+      if (bar) return openForm(bookings.find(b => b.id === bar.dataset.id));
+      const cell = ev.target.closest(".cell");
+      if (cell) openForm(null, {room: cell.dataset.room, checkin: cell.dataset.day});
+    };
+  }
+
+  function renderList(){
+    const host = $("#view-list");
+    const tk = todayKey(), tm = addDays(tk,1);
+    const sorted = [...bookings].filter(b => b.source !== "Chiusa");
+    const item = (b, when) => `<div class="item" data-id="${esc(b.id)}"><span class="dot" style="background:${colorOf(b.source)}"></span><div class="grow"><div><b>${esc(b.guest || b.source)}</b> · ${esc(roomName(b.room))}</div><div class="meta">${when}${b.pax?" · "+b.pax+" pers.":""}${b.phone?" · "+esc(b.phone):""}${b.price? " · "+money(b.price):""}</div></div></div>`;
+    const block = (title, list, whenFn) => `<div class="card"><h3>${title} (${list.length})</h3>${list.length ? list.map(b => item(b, whenFn(b))).join("") : `<div class="meta" style="color:var(--muted);font-size:13px">Nessuno</div>`}</div>`;
+    const arrToday = sorted.filter(b => b.checkin === tk);
+    const depToday = sorted.filter(b => b.checkout === tk);
+    const inHouse = sorted.filter(b => b.checkin < tk && b.checkout > tk);
+    const arrTom = sorted.filter(b => b.checkin === tm);
+    const upcoming = sorted.filter(b => b.checkin > tm && b.checkin <= addDays(tk,14)).sort((a,b) => a.checkin.localeCompare(b.checkin));
+    const range = b => `${fmtDay(b.checkin)} → ${fmtDay(b.checkout)}`;
+    host.innerHTML = `<div class="cards">
+      ${block("Arrivi oggi", arrToday, b => "fino a " + fmtDay(b.checkout))}
+      ${block("Partenze oggi", depToday, b => "arrivato " + fmtDay(b.checkin))}
+      ${block("In casa", inHouse, b => "parte " + fmtDay(b.checkout))}
+      ${block("Arrivi domani", arrTom, b => "fino a " + fmtDay(b.checkout))}
+      ${block("Prossimi 14 giorni", upcoming, range)}
+    </div>`;
+    host.onclick = ev => { const it = ev.target.closest(".item"); if (it) openForm(bookings.find(b => b.id === it.dataset.id)); };
+  }
+
+  function renderSettings(){
+    const list = $("#roomList");
+    list.innerHTML = rooms.map((r,i) => `<div class="r" data-id="${esc(r.id)}">
+      <input value="${esc(r.name)}" data-act="name" aria-label="Nome camera">
+      <label class="park-l" title="Riga di appoggio: non è una camera, ci puoi parcheggiare più prenotazioni insieme"><input type="checkbox" data-act="park" ${r.parking?"checked":""}> appoggio</label>
+      <button class="btn" data-act="up" ${i===0?"disabled":""} aria-label="Su">↑</button>
+      <button class="btn" data-act="down" ${i===rooms.length-1?"disabled":""} aria-label="Giù">↓</button>
+      <button class="btn danger" data-act="del" aria-label="Elimina">✕</button></div>`).join("") || `<div style="color:var(--muted);font-size:13px">Nessuna camera ancora.</div>`;
+    const sel = $("#icsRoom"), cur = sel.value;
+    sel.innerHTML = rooms.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");
+    if (cur) sel.value = cur;
+    const used = n => bookings.filter(b => b.source === n).length;
+    if (!$("#srcList").contains(document.activeElement)) $("#srcList").innerHTML = sources.map((s,i) => `<div class="r src" data-i="${i}">
+      <input type="color" value="${esc(s.color)}" data-act="color" aria-label="Colore">
+      <input type="text" value="${esc(s.name)}" data-act="sname" aria-label="Nome voce">
+      <span style="font-size:12px;color:var(--muted);white-space:nowrap">${used(s.name)} pren.</span>
+      <button class="btn" data-act="sup" ${i===0?"disabled":""} aria-label="Su">↑</button>
+      <button class="btn danger" data-act="sdel" aria-label="Elimina">✕</button></div>`).join("");
+    const isel = $("#icsSource"), icur = isel.value;
+    isel.innerHTML = `<option value="auto">Riconosci da solo</option>` + sources.map(s => `<option>${esc(s.name)}</option>`).join("");
+    if (icur) isel.value = icur;
+  }
+  function renderLegend(){
+    $("#legend").innerHTML = sources.map(s => `<span style="--c:${esc(s.color)}">${esc(s.name)}</span>`).join("");
+  }
+
+  // ---------- trascina e rilascia ----------
+  let drag = null, justDragged = false, renderPending = false;
+  const cellAt = (x, y) => document.elementsFromPoint(x, y).find(el => el.classList && el.classList.contains("cell"));
+  function attachDrag(wrap, geo){
+    const begin = (ev, x, y, isTouch) => {
+      const bar = ev.target.closest(".bar"); if (!bar || moving) return;
+      const b = bookings.find(x => x.id === bar.dataset.id); if (!b) return;
+      const n = diffDays(b.checkin, b.checkout);
+      const c = cellAt(x, y);
+      let off = c ? diffDays(b.checkin, c.dataset.day) : 0;
+      off = Math.max(0, Math.min(n - 1, off));
+      drag = {b, bar, n, off, x0: x, y0: y, x, y, active: false, isTouch, wrap, geo, target: null};
+      if (isTouch) drag.timer = setTimeout(() => activate(), 300);
+    };
+    const activate = () => {
+      if (!drag || drag.active) return;
+      drag.active = true;
+      if (navigator.vibrate) try { navigator.vibrate(15); } catch {}
+      drag.bar.classList.add("dragging");
+      const g = drag.bar.cloneNode(true);
+      g.className = "bar ghost"; g.style.cssText = drag.bar.style.cssText + `;position:fixed;top:0;left:0;width:${drag.bar.offsetWidth}px;pointer-events:none`;
+      document.body.appendChild(g); drag.ghost = g;
+      const r = drag.bar.getBoundingClientRect(); drag.gx = drag.x0 - r.left; drag.gy = drag.y0 - r.top;
+      const p = document.createElement("div"); p.className = "slot"; drag.wrap.querySelector(".cal").appendChild(p); drag.slot = p;
+      document.body.classList.add("dragmode");
+      move(drag.x, drag.y); autoScroll();
+    };
+    const move = (x, y) => {
+      if (!drag) return;
+      drag.x = x; drag.y = y;
+      if (!drag.active){
+        if (Math.hypot(x - drag.x0, y - drag.y0) > 8){
+          if (drag.isTouch){ clearTimeout(drag.timer); drag = null; return; } // era uno scorrimento
+          activate();
+        } else return;
+      }
+      drag.ghost.style.transform = `translate(${x - drag.gx}px, ${y - drag.gy}px)`;
+      const c = cellAt(x, y);
+      if (!c){ drag.target = null; drag.slot.style.display = "none"; return; }
+      const room = c.dataset.room, checkin = addDays(c.dataset.day, -drag.off);
+      const t = {id: drag.b.id, room, checkin, checkout: addDays(checkin, drag.n)};
+      const r = rooms.find(r => r.id === room);
+      const clash = !(r && r.parking) && bookings.some(b => b.id !== drag.b.id && overlaps(t, b));
+      drag.target = t;
+      const row = c.parentElement;
+      const s = diffDays(start, checkin);
+      const { cw, rw } = drag.geo;
+      Object.assign(drag.slot.style, {display: "block", top: (row.offsetTop + 3) + "px", height: (row.offsetHeight - 6) + "px",
+        left: (rw + s*cw) + "px", width: (drag.n*cw) + "px"});
+      drag.slot.classList.toggle("bad", clash);
+      drag.slot.textContent = `${roomName(room)} · ${fmtDay(t.checkin)} → ${fmtDay(t.checkout)}${clash ? " · occupata" : ""}`;
+    };
+    const autoScroll = () => {
+      if (!drag || !drag.active) return;
+      const w = drag.wrap, r = w.getBoundingClientRect(), m = 40, sp = 12;
+      let dx = 0, dy = 0;
+      if (drag.x < r.left + m + drag.geo.rw) dx = -sp; else if (drag.x > r.right - m) dx = sp;
+      if (drag.y < r.top + m + 20) dy = -sp; else if (drag.y > r.bottom - m) dy = sp;
+      if (dx || dy){ w.scrollLeft += dx; w.scrollTop += dy; move(drag.x, drag.y); }
+      requestAnimationFrame(autoScroll);
+    };
+    const finish = async (cancel) => {
+      if (!drag) return;
+      const d = drag; drag = null; clearTimeout(d.timer);
+      if (!d.active) return;
+      justDragged = true; setTimeout(() => justDragged = false, 400);
+      d.ghost && d.ghost.remove(); d.slot && d.slot.remove(); d.bar.classList.remove("dragging");
+      document.body.classList.remove("dragmode");
+      const t = d.target;
+      if (!cancel && t && !(t.room === d.b.room && t.checkin === d.b.checkin)){
+        moving = {...d.b};
+        await tryMove(t.room, t.checkin, false);
+        if (moving && pendingTarget){ document.body.classList.add("moving"); renderCal(); return; }
+      }
+      if (renderPending){ renderPending = false; render(); }
+    };
+    // mouse
+    wrap.addEventListener("mousedown", ev => { if (ev.button === 0) begin(ev, ev.clientX, ev.clientY, false); });
+    window.onmousemove = ev => { if (drag && !drag.isTouch){ move(ev.clientX, ev.clientY); if (drag && drag.active) ev.preventDefault(); } };
+    window.onmouseup = () => { if (drag && !drag.isTouch) finish(false); };
+    // touch (tieni premuto ~0,3 s, poi trascina)
+    wrap.addEventListener("touchstart", ev => { if (ev.touches.length === 1) begin(ev, ev.touches[0].clientX, ev.touches[0].clientY, true); }, {passive: true});
+    wrap.addEventListener("touchmove", ev => {
+      if (!drag) return;
+      const t = ev.touches[0]; move(t.clientX, t.clientY);
+      if (drag && drag.active) ev.preventDefault();
+    }, {passive: false});
+    wrap.addEventListener("touchend", () => finish(false));
+    wrap.addEventListener("touchcancel", () => finish(true));
+    wrap.addEventListener("contextmenu", ev => { if (ev.target.closest(".bar")) ev.preventDefault(); });
+  }
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && drag && drag.active){ drag.target = null; window.onmouseup(); } });
+
+  function render(){
+    if (drag && drag.active){ renderPending = true; return; }
+    renderLegend();
+    if (view === "cal") renderCal();
+    else if (view === "list") renderList();
+    else renderSettings();
+  }
+
+  // ---------- nav ----------
+  $("#prevBtn").onclick = () => { start = addDays(start, -14); renderCal(); };
+  $("#nextBtn").onclick = () => { start = addDays(start, 14); renderCal(); };
+  $("#todayBtn").onclick = () => { start = addDays(todayKey(), -3); renderCal(); };
+  $("#jumpDate").onchange = e => { if (e.target.value){ start = e.target.value; renderCal(); } };
+
+  // ---------- form ----------
+  const ov = $("#ov");
+  function updateFormHints(){
+    const ci = $("#fIn").value, co = $("#fOut").value;
+    const n = ci && co ? diffDays(ci, co) : 0;
+    $("#fNights").textContent = n > 0 ? `${n} nott${n===1?"e":"i"}` : "";
+    const warn = $("#fWarn");
+    if (n > 0){
+      const me = {id: editingId, room: $("#fRoom").value, checkin: ci, checkout: co};
+      const clash = isParking(me.room) ? [] : bookings.filter(b => b.id !== editingId && overlaps(me, b));
+      if (clash.length){
+        warn.innerHTML = "⚠️ Questa camera è già occupata in quei giorni da: " + clash.map(b => `<b>${esc(b.guest || b.source)}</b> (${fmtDay(b.checkin)} → ${fmtDay(b.checkout)})`).join(", ");
+        warn.style.display = "block";
+      } else warn.style.display = "none";
+    } else warn.style.display = "none";
+  }
+  ["#fIn","#fOut","#fRoom"].forEach(s => $(s).addEventListener("change", () => {
+    if (s === "#fIn" && $("#fIn").value && (!$("#fOut").value || $("#fOut").value <= $("#fIn").value)) $("#fOut").value = addDays($("#fIn").value, 1);
+    updateFormHints();
+  }));
+
+  function openForm(b, preset){
+    if (!rooms.length){ document.querySelector('.tabs button[data-view=settings]').click(); return; }
+    editingId = b ? b.id : null;
+    $("#formTitle").textContent = b ? "Modifica prenotazione" : "Nuova prenotazione";
+    $("#fRoom").innerHTML = rooms.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");
+    const p = b || preset || {};
+    $("#fGuest").value = p.guest || "";
+    $("#fRoom").value = p.room || rooms[0].id;
+    const srcNames = sources.map(s => s.name);
+    if (p.source && !srcNames.includes(p.source)) srcNames.push(p.source);
+    $("#fSource").innerHTML = srcNames.map(n => `<option>${esc(n)}</option>`).join("");
+    $("#fSource").value = p.source || srcNames[0];
+    $("#fIn").value = p.checkin || todayKey();
+    $("#fOut").value = p.checkout || addDays($("#fIn").value, 1);
+    $("#fPax").value = p.pax || "";
+    $("#fPhone").value = p.phone || "";
+    $("#fPrice").value = p.price ?? "";
+    $("#fDeposit").value = p.deposit ?? "";
+    $("#fNotes").value = p.notes || "";
+    $("#fDelete").hidden = !b;
+    $("#fMove").hidden = !b;
+    $("#fDelete").textContent = "Elimina";
+    $("#fDelete").dataset.armed = "";
+    $("#fErr").textContent = "";
+    $("#fSave").disabled = !canWrite;
+    updateFormHints();
+    ov.classList.add("on");
+    setTimeout(() => $("#fGuest").focus(), 50);
+  }
+  function closeForm(){ ov.classList.remove("on"); editingId = null; }
+  $("#fCancel").onclick = closeForm;
+  ov.addEventListener("click", e => { if (e.target === ov) closeForm(); });
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && ov.classList.contains("on")) closeForm(); });
+  $("#newBtn").onclick = () => openForm(null);
+
+  const num = v => v === "" ? null : Number(v);
+  $("#form").addEventListener("submit", async e => {
+    e.preventDefault();
+    if (!db) return;
+    const data = {
+      guest: $("#fGuest").value.trim(),
+      room: $("#fRoom").value,
+      source: $("#fSource").value,
+      checkin: $("#fIn").value,
+      checkout: $("#fOut").value,
+      pax: num($("#fPax").value),
+      phone: $("#fPhone").value.trim(),
+      price: num($("#fPrice").value),
+      deposit: num($("#fDeposit").value),
+      notes: $("#fNotes").value.trim(),
+      updatedAt: new Date().toISOString()
+    };
+    if (!data.checkin || !data.checkout || data.checkout <= data.checkin){ $("#fErr").textContent = "La partenza deve essere dopo l'arrivo."; return; }
+    const old = editingId ? bookings.find(b => b.id === editingId) : null;
+    if (old && old.icsUid){ data.icsUid = old.icsUid; data.imported = old.imported; }
+    $("#fSave").disabled = true;
+    try {
+      const ref = editingId ? db.collection("bookings").doc(editingId) : db.collection("bookings").doc();
+      await ref.set(data);
+      closeForm();
+    } catch (err) {
+      $("#fErr").textContent = writeErr(err);
+    } finally { $("#fSave").disabled = !canWrite; }
+  });
+
+  $("#fDelete").onclick = async () => {
+    const btn = $("#fDelete");
+    if (!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "Conferma eliminazione"; return; }
+    try { await db.collection("bookings").doc(editingId).delete(); closeForm(); }
+    catch (err) { $("#fErr").textContent = writeErr(err); }
+  };
+
+  // ---------- sposta (taglia e incolla) ----------
+  let moving = null, pendingTarget = null;
+  const nightsTxt = n => `${n} nott${n===1?"e":"i"}`;
+  function showMove(extraHtml){
+    const n = diffDays(moving.checkin, moving.checkout);
+    $("#moveText").innerHTML = `✂️ Stai spostando <b>${esc(moving.guest || moving.source)}</b> (${esc(roomName(moving.room))}, ${fmtDay(moving.checkin)}, ${nightsTxt(n)}).<br>Tocca nel calendario la camera e il <b>giorno di arrivo</b> dove vuoi metterla.` + (extraHtml || "");
+    $("#moveBan").hidden = false;
+  }
+  function startMove(b){
+    moving = {...b}; pendingTarget = null;
+    closeForm();
+    document.body.classList.add("moving");
+    $("#moveForce").hidden = true;
+    if (view !== "cal") document.querySelector('.tabs button[data-view=cal]').click();
+    showMove(); renderCal();
+  }
+  function endMove(){
+    moving = null; pendingTarget = null;
+    document.body.classList.remove("moving");
+    $("#moveBan").hidden = true; renderCal();
+  }
+  async function tryMove(room, checkin, force){
+    if (!moving || !db) return;
+    const n = diffDays(moving.checkin, moving.checkout);
+    const target = {id: moving.id, room, checkin, checkout: addDays(checkin, n)};
+    if (target.room === moving.room && target.checkin === moving.checkin) return;
+    const clash = isParking(room) ? [] : bookings.filter(b => b.id !== moving.id && overlaps(target, b));
+    if (clash.length && !force){
+      pendingTarget = target;
+      setStatus("");
+      showMove(`<div class="err">⚠️ ${esc(roomName(room))} dal ${fmtDay(target.checkin)} al ${fmtDay(target.checkout)} è già occupata da ${clash.map(b => "<b>"+esc(b.guest || b.source)+"</b>").join(", ")}. Scegli un altro posto o sposta comunque.</div>`);
+      $("#moveForce").hidden = false;
+      return;
+    }
+    try {
+      await db.collection("bookings").doc(moving.id).update({room: target.room, checkin: target.checkin, checkout: target.checkout, movedManually: true, updatedAt: new Date().toISOString()});
+      const msg = `Spostata: ${moving.guest || moving.source} → ${roomName(target.room)}, ${fmtDay(target.checkin)} → ${fmtDay(target.checkout)}`;
+      endMove(); setStatus("✅ " + msg); setTimeout(() => { if (statusEl.textContent.startsWith("✅")) setStatus(""); }, 5000);
+    } catch (err) { showMove(`<div class="err">${esc(writeErr(err))}</div>`); }
+  }
+  $("#fMove").onclick = () => { const b = bookings.find(x => x.id === editingId); if (b) startMove(b); };
+  $("#moveCancel").onclick = endMove;
+  $("#moveForce").onclick = () => { if (pendingTarget) tryMove(pendingTarget.room, pendingTarget.checkin, true); };
+  document.addEventListener("keydown", e => { if (e.key === "Escape" && moving && !ov.classList.contains("on")) endMove(); });
+
+  function writeErr(err){
+    const c = err && err.code;
+    if (c === "invalid_argument"){ canWrite = false; return "Non hai i permessi per modificare questi dati."; }
+    if (c === "quota_exceeded") return "Spazio esaurito: elimina qualche prenotazione vecchia e riprova.";
+    if (c === "resource_exhausted") return "Troppe operazioni ravvicinate, riprova tra qualche secondo.";
+    return "Salvataggio non riuscito, controlla la connessione e riprova.";
+  }
+
+  // ---------- provenienze ----------
+  const srcMsg = (t, ok) => { const m = $("#srcMsg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); };
+  async function saveSources(list){
+    await db.doc("settings/sources").set({list});
+    sources = list; render();
+  }
+  $("#addSrcBtn").onclick = async () => {
+    const name = $("#newSrcName").value.trim(); if (!name || !db) return;
+    if (sources.some(s => s.name.toLowerCase() === name.toLowerCase())) return srcMsg("Esiste già una voce con questo nome.");
+    try { await saveSources([...sources, {name, color: $("#newSrcColor").value}]); $("#newSrcName").value = ""; srcMsg("", true); }
+    catch (e) { srcMsg(writeErr(e)); }
+  };
+  $("#newSrcName").addEventListener("keydown", e => { if (e.key === "Enter") $("#addSrcBtn").click(); });
+  $("#srcList").addEventListener("change", async e => {
+    const row = e.target.closest(".r"); if (!row || !db) return;
+    const i = +row.dataset.i, list = sources.map(s => ({...s})), act = e.target.dataset.act;
+    try {
+      if (act === "color"){ list[i].color = e.target.value; await saveSources(list); }
+      else if (act === "sname"){
+        const oldName = list[i].name, name = e.target.value.trim();
+        if (!name || name === oldName){ e.target.value = oldName; return; }
+        if (list.some((s,j) => j !== i && s.name.toLowerCase() === name.toLowerCase())){ e.target.value = oldName; return srcMsg("Esiste già una voce con questo nome."); }
+        list[i].name = name;
+        await saveSources(list);
+        const toFix = bookings.filter(b => b.source === oldName);
+        for (const b of toFix) await db.collection("bookings").doc(b.id).update({source: name});
+        srcMsg(`Rinominata "${oldName}" in "${name}"${toFix.length ? `, aggiornate ${toFix.length} prenotazioni` : ""}.`, true);
+      }
+    } catch (err) { srcMsg(writeErr(err)); }
+  });
+  $("#srcList").addEventListener("click", async e => {
+    const act = e.target.dataset.act, row = e.target.closest(".r"); if (!row || !db || !act) return;
+    const i = +row.dataset.i, list = sources.map(s => ({...s}));
+    try {
+      if (act === "sup" && i > 0){ [list[i-1], list[i]] = [list[i], list[i-1]]; await saveSources(list); }
+      else if (act === "sdel"){
+        if (list.length <= 1) return srcMsg("Serve almeno una voce.");
+        const n = bookings.filter(b => b.source === list[i].name).length;
+        if (!e.target.dataset.armed){ e.target.dataset.armed = "1"; e.target.textContent = n ? `Elimina? (${n} pren. diventano grigie)` : "Conferma"; return; }
+        list.splice(i, 1); await saveSources(list);
+      }
+    } catch (err) { srcMsg(writeErr(err)); }
+  });
+
+  // ---------- rooms ----------
+  const slug = s => (s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g,"").replace(/[^a-z0-9]+/g,"-").replace(/^-|-$/g,"") || "camera").slice(0,40);
+  async function addRoom(name, parking){
+    let id = slug(name), i = 2;
+    while (rooms.some(r => r.id === id)) id = slug(name) + "-" + (i++);
+    const order = rooms.length ? Math.max(...rooms.map(r => r.order || 0)) + 1 : 1;
+    const data = parking ? {name, order, parking: true} : {name, order};
+    await db.collection("rooms").doc(id).set(data);
+    rooms.push({id, ...data}); // optimistic for sequential adds
+  }
+  const roomMsg = (t, ok) => { const m = $("#roomMsg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); };
+  $("#addRoomBtn").onclick = async () => {
+    const name = $("#newRoomName").value.trim(); if (!name || !db) return;
+    try { await addRoom(name); $("#newRoomName").value = ""; roomMsg("", true); } catch (e) { roomMsg(writeErr(e)); }
+  };
+  $("#addParkBtn").onclick = async () => {
+    if (!db) return;
+    const name = rooms.some(r => r.name === "Salvataggio") ? "Appoggio " + (rooms.filter(r => r.parking).length + 1) : "Salvataggio";
+    try { await addRoom(name, true); roomMsg(`Aggiunta "${name}" in fondo al calendario. Puoi rinominarla.`, true); } catch (e) { roomMsg(writeErr(e)); }
+  };
+  $("#newRoomName").addEventListener("keydown", e => { if (e.key === "Enter") $("#addRoomBtn").click(); });
+  $("#bulkBtn").onclick = async () => {
+    const n = Math.min(30, Math.max(1, parseInt($("#bulkN").value) || 0)); if (!db) return;
+    const btn = $("#bulkBtn"); btn.disabled = true;
+    try {
+      let base = rooms.length;
+      for (let i = 1; i <= n; i++) await addRoom("Camera " + (base + i));
+      roomMsg(`Create ${n} camere. Puoi rinominarle qui sopra.`, true);
+    } catch (e) { roomMsg(writeErr(e)); } finally { btn.disabled = false; }
+  };
+  $("#roomList").addEventListener("change", async e => {
+    if (e.target.dataset.act === "park"){
+      const id = e.target.closest(".r").dataset.id;
+      try { await db.collection("rooms").doc(id).update({parking: e.target.checked}); } catch (err) { roomMsg(writeErr(err)); }
+      return;
+    }
+    if (e.target.dataset.act !== "name") return;
+    const id = e.target.closest(".r").dataset.id, name = e.target.value.trim();
+    if (!name) return render();
+    try { await db.collection("rooms").doc(id).update({name}); } catch (err) { roomMsg(writeErr(err)); }
+  });
+  $("#roomList").addEventListener("click", async e => {
+    const act = e.target.dataset.act; if (!act || act === "name") return;
+    const row = e.target.closest(".r"), id = row.dataset.id;
+    const idx = rooms.findIndex(r => r.id === id);
+    try {
+      if (act === "up" || act === "down"){
+        const j = act === "up" ? idx-1 : idx+1; if (j < 0 || j >= rooms.length) return;
+        const a = rooms[idx], b = rooms[j];
+        const ao = a.order, bo = b.order === ao ? ao + (act==="up"?-1:1) : b.order;
+        await db.collection("rooms").doc(a.id).update({order: bo});
+        await db.collection("rooms").doc(b.id).update({order: ao});
+      } else if (act === "del"){
+        const used = bookings.filter(b => b.room === id).length;
+        if (!e.target.dataset.armed){
+          e.target.dataset.armed = "1"; e.target.textContent = used ? `Elimina (+${used} pren.)` : "Conferma";
+          return;
+        }
+        for (const b of bookings.filter(b => b.room === id)) await db.collection("bookings").doc(b.id).delete();
+        await db.collection("rooms").doc(id).delete();
+      }
+    } catch (err) { roomMsg(writeErr(err)); }
+  });
+
+  // ---------- iCal import ----------
+  function parseICS(text){
+    const lines = text.replace(/\r\n/g,"\n").replace(/\n[ \t]/g,"").split("\n");
+    const events = []; let cur = null;
+    for (const line of lines){
+      if (line === "BEGIN:VEVENT") cur = {};
+      else if (line === "END:VEVENT"){ if (cur) events.push(cur); cur = null; }
+      else if (cur){
+        const i = line.indexOf(":"); if (i < 0) continue;
+        const key = line.slice(0,i).split(";")[0].toUpperCase(), val = line.slice(i+1);
+        if (key === "DTSTART" || key === "DTEND"){
+          const m = val.match(/(\d{4})(\d{2})(\d{2})/); if (m) cur[key] = `${m[1]}-${m[2]}-${m[3]}`;
+        } else if (key === "UID" || key === "SUMMARY" || key === "DESCRIPTION") cur[key] = val.replace(/\\n/g," ").replace(/\\,/g,",").replace(/\\;/g,";");
+      }
+    }
+    return events.filter(e => e.DTSTART && e.DTEND && e.DTEND > e.DTSTART);
+  }
+  const icsMsg = (t, ok) => { const m = $("#icsMsg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); };
+  $("#icsBtn").onclick = async () => {
+    if (!db) return;
+    const room = $("#icsRoom").value, file = $("#icsFile").files[0];
+    if (!room) return icsMsg("Prima aggiungi le camere.");
+    if (!file) return icsMsg("Scegli il file .ics da caricare.");
+    const btn = $("#icsBtn"); btn.disabled = true; icsMsg("Importazione in corso…", true);
+    try {
+      const text = await file.text();
+      if (!/BEGIN:VCALENDAR/i.test(text)) throw {msg:"Il file non sembra un calendario .ics."};
+      let source = $("#icsSource").value;
+      if (source === "auto"){
+        const find = re => (sources.find(s => re.test(s.name)) || {}).name;
+        source = /airbnb/i.test(text) ? (find(/airbnb/i) || "Airbnb") : /booking\.com/i.test(text) ? (find(/booking/i) || "Booking") : (find(/altro/i) || sources[0].name);
+      }
+      const evs = parseICS(text);
+      const tk = todayKey();
+      let added = 0, updated = 0, removed = 0;
+      const seen = new Set();
+      for (const ev of evs){
+        if (ev.DTEND < addDays(tk, -30)) continue; // ignora il passato remoto
+        const uid = ev.UID || (ev.DTSTART + ev.DTEND + (ev.SUMMARY||""));
+        const id = "ics-" + hash(source + "|" + room + "|" + uid);
+        seen.add(id);
+        const summary = (ev.SUMMARY || "").trim();
+        const blocked = /not available|non disponibile|closed|blocked/i.test(summary) && !/reserved/i.test(summary);
+        const existing = bookings.find(b => b.id === id);
+        if (existing){
+          if (existing.movedManually) continue; // spostata a mano: non la tocco
+          if (existing.checkin !== ev.DTSTART || existing.checkout !== ev.DTEND){
+            await db.collection("bookings").doc(id).update({checkin: ev.DTSTART, checkout: ev.DTEND, updatedAt: new Date().toISOString()});
+            updated++;
+          }
+        } else {
+          await db.collection("bookings").doc(id).set({
+            guest: "", room, source: blocked && source === "Altro" ? "Chiusa" : source,
+            checkin: ev.DTSTART, checkout: ev.DTEND, pax: null, phone: "", price: null, deposit: null,
+            notes: [summary, ev.DESCRIPTION].filter(Boolean).join(" · ").slice(0, 500),
+            imported: true, icsUid: uid, updatedAt: new Date().toISOString()
+          });
+          added++;
+        }
+      }
+      if ($("#icsPrune").checked){
+        for (const b of bookings.filter(b => b.imported && b.room === room && b.source === source && !seen.has(b.id) && b.checkout >= tk)){
+          await db.collection("bookings").doc(b.id).delete(); removed++;
+        }
+      }
+      icsMsg(`Fatto (${source}): ${added} nuove, ${updated} aggiornate${$("#icsPrune").checked ? `, ${removed} rimosse` : ""}. Nel calendario puoi aprirle e aggiungere nome e prezzo.`, true);
+      $("#icsFile").value = "";
+    } catch (err) {
+      icsMsg(err && err.msg ? err.msg : writeErr(err));
+    } finally { btn.disabled = false; }
+  };
+
+  // ---------- backup ----------
+  const backupMsg = (t, ok) => { const m = $("#backupMsg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); };
+  function csv(){
+    const head = ["Camera","Ospite","Provenienza","Arrivo","Partenza","Notti","Persone","Telefono","Prezzo","Acconto","Note"];
+    const q = v => { const s = String(v ?? ""); return /[;"\n]/.test(s) ? '"' + s.replace(/"/g,'""') + '"' : s; };
+    const rows = [...bookings].sort((a,b) => a.checkin.localeCompare(b.checkin)).map(b =>
+      [roomName(b.room), b.guest, b.source, b.checkin, b.checkout, diffDays(b.checkin,b.checkout), b.pax, b.phone,
+       b.price != null ? String(b.price).replace(".",",") : "", b.deposit != null ? String(b.deposit).replace(".",",") : "", b.notes].map(q).join(";"));
+    return "﻿" + [head.join(";"), ...rows].join("\n");
+  }
+  async function save(filename, data){
+    if (!downloads){ backupMsg("Download non disponibile qui: usa \"Copia elenco\"."); return; }
+    try { await downloads.save({filename, data}); backupMsg("Backup pronto.", true); }
+    catch { backupMsg("Download annullato."); }
+  }
+  $("#backupJson").onclick = () => save(`prenotazioni-backup-${todayKey()}.json`, JSON.stringify({exportedAt: new Date().toISOString(), sources, rooms, bookings}, null, 2));
+  $("#backupCsv").onclick = () => save(`prenotazioni-${todayKey()}.csv`, csv());
+  $("#restoreBtn").onclick = async () => {
+    const f = $("#restoreFile").files[0]; if (!f || !db) return backupMsg("Scegli prima il file di backup (.json).");
+    const btn = $("#restoreBtn");
+    if (!btn.dataset.armed){ btn.dataset.armed = "1"; btn.textContent = "Conferma ripristino"; backupMsg("Le camere e prenotazioni del backup verranno aggiunte (quelle uguali sovrascritte). Premi di nuovo per confermare.", true); return; }
+    btn.dataset.armed = ""; btn.textContent = "Ripristina"; btn.disabled = true;
+    try {
+      const data = JSON.parse(await f.text());
+      if (!Array.isArray(data.rooms) || !Array.isArray(data.bookings)) throw {msg: "Il file non è un backup di questa app."};
+      const clean = o => { const c = {...o}; delete c.id; return c; };
+      let n = 0;
+      if (Array.isArray(data.sources) && data.sources.length) await db.doc("settings/sources").set({list: data.sources});
+      for (const r of data.rooms) if (r.id){ await db.collection("rooms").doc(r.id).set(clean(r)); n++; }
+      for (const b of data.bookings) if (b.id && b.checkin && b.checkout){ await db.collection("bookings").doc(b.id).set(clean(b)); n++;
+        if (n % 40 === 0){ backupMsg(`Ripristino… ${n}`, true); await new Promise(r => setTimeout(r, 1500)); } }
+      backupMsg(`Ripristino completato: ${data.rooms.length} camere, ${data.bookings.length} prenotazioni.`, true);
+      $("#restoreFile").value = "";
+    } catch (e) { backupMsg(e && e.msg ? e.msg : (e instanceof SyntaxError ? "File non leggibile." : writeErr(e))); }
+    finally { btn.disabled = false; }
+  };
+  $("#copyCsv").onclick = async () => {
+    try { await navigator.clipboard.writeText(csv().slice(1)); backupMsg("Elenco copiato: incollalo in Excel o in una mail.", true); }
+    catch { backupMsg("Copia non riuscita su questo dispositivo."); }
+  };
+
+  // ---------- boot ----------
+  render();
+  let timer = null;
+  window.__ready.then(() => { timer = setTimeout(() => setStatus("Sei offline o la connessione è lenta: vedi i dati salvati sul dispositivo, le modifiche partono appena torna la rete.", true), 10000); });
+  const maybeReady = (fromCache) => {
+    if (gotRooms && gotBookings && !fromCache){ clearTimeout(timer); setStatus(""); }
+  };
+
+  (async () => {
+    try { downloads = await claude.use("downloads"); } catch {}
+    try {
+      const user = await claude.use("user");
+      if (user && user.can){ const w = await user.can("data.write"); if (w === false) canWrite = false; }
+    } catch {}
+  })();
+
+  (async () => {
+    try { db = await claude.use("db"); } catch { db = null; }
+    if (!db){ clearTimeout(timer); setStatus("Impossibile collegarsi al database.", true); return; }
+    const onErr = e => { clearTimeout(timer); if (e && e.code !== "revoked") setStatus("Connessione ai dati interrotta. Ricarica la pagina.", true); };
+    db.collection("rooms").onSnapshot(snap => {
+      rooms = snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => (a.order||0) - (b.order||0) || a.name.localeCompare(b.name));
+      gotRooms = true; maybeReady(snap.metadata.fromCache); render();
+    }, onErr);
+    db.doc("settings/sources").onSnapshot(snap => {
+      const l = snap.exists && snap.data().list;
+      sources = Array.isArray(l) && l.length ? l : DEFAULT_SOURCES;
+      render();
+    }, () => {});
+    db.collection("bookings").onSnapshot(snap => {
+      bookings = snap.docs.map(d => ({id: d.id, ...d.data()})).filter(b => b.checkin && b.checkout);
+      gotBookings = true; maybeReady(snap.metadata.fromCache); render();
+    }, onErr);
+  })();
+})();
+</script>
+</body>
+</html>
