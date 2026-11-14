@@ -159,6 +159,14 @@ body.dragmode,body.dragmode *{cursor:grabbing!important;-webkit-user-select:none
 #loginForm h2{margin:0 0 4px;font-size:20px}
 #loginForm p{color:var(--muted);margin:0 0 16px;font-size:14px}
 .linkbtn{background:none;border:0;color:var(--accent);padding:0;font-size:13px;text-decoration:underline}
+.syncroom{border-top:1px solid var(--line);padding:12px 0}
+.syncroom:first-child{border-top:0}
+.syncroom h3{margin:0 0 8px;font-size:15px}
+.syncroom .feedrow{display:grid;grid-template-columns:80px 1fr;gap:8px;align-items:center;margin-bottom:6px}
+.syncroom .feedrow span{font-size:13px;color:var(--muted)}
+.exportrow{display:flex;gap:6px;align-items:center;margin-bottom:6px;font-size:13px}
+.exportrow code{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;background:var(--bg);padding:6px 8px;border-radius:6px;font-size:11.5px}
+.sublabel{font-size:12px;color:var(--muted);margin:8px 0 4px;font-weight:600}
 .empty{background:var(--panel);border:1px dashed var(--line);border-radius:10px;padding:28px;text-align:center}
 .empty h2{margin:0 0 6px;font-size:18px}
 .empty p{color:var(--muted);margin:0 0 16px}
@@ -289,6 +297,24 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
         <button class="btn" id="addSrcBtn">Aggiungi</button>
       </div>
       <div class="msg" id="srcMsg"></div>
+    </div>
+
+    <div class="section" id="syncSection">
+      <h2>🔄 Sincronizzazione automatica Booking / Airbnb</h2>
+      <p class="hint" id="syncStatusLine">Ogni 15 minuti l'app scarica da sola le prenotazioni dai portali e i portali leggono le tue date occupate.</p>
+      <div class="inline" style="margin-bottom:12px">
+        <button class="btn primary" id="syncNowBtn">Sincronizza ora</button>
+        <span class="msg" id="syncMsg" style="margin:0"></span>
+      </div>
+      <div id="syncRooms"></div>
+      <details style="margin-top:12px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:13px">Configurazione tecnica</summary>
+        <div class="grid2" style="margin-top:10px">
+          <div class="field"><label>Indirizzo del servizio</label><input id="syncUrl" placeholder="https://..."></div>
+          <div class="field"><label>Chiave</label><input id="syncKey"></div>
+        </div>
+        <button class="btn" id="syncCfgSave">Salva configurazione</button>
+      </details>
     </div>
 
     <div class="section">
@@ -515,7 +541,74 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     host.onclick = ev => { const it = ev.target.closest(".item"); if (it) openForm(bookings.find(b => b.id === it.dataset.id)); };
   }
 
+  // ---------- sincronizzazione ----------
+  let syncCfg = null, syncStatus = null;
+  const srcName = re => (sources.find(s => re.test(s.name)) || {}).name;
+  const PORTALS = () => [{key: "Booking", name: srcName(/booking/i) || "Booking"}, {key: "Airbnb", name: srcName(/airbnb/i) || "Airbnb"}];
+  function renderSync(){
+    const host = $("#syncRooms"); if (!host) return;
+    if (document.activeElement && host.contains(document.activeElement)) return;
+    const ok = syncCfg && syncCfg.url && syncCfg.key;
+    $("#syncNowBtn").disabled = !ok;
+    if (syncCfg && !$("#syncSection").contains(document.activeElement)){ $("#syncUrl").value = syncCfg.url || ""; $("#syncKey").value = syncCfg.key || ""; }
+    let line = "Ogni 15 minuti l'app scarica da sola le prenotazioni dai portali e i portali leggono le tue date occupate.";
+    if (!ok) line = "Sincronizzazione non ancora configurata.";
+    else if (syncStatus && syncStatus.at){
+      const errs = (syncStatus.report || []).filter(r => !r.ok);
+      line = "Ultima sincronizzazione: " + new Date(syncStatus.at).toLocaleString("it-IT", {day:"numeric", month:"short", hour:"2-digit", minute:"2-digit"}) +
+        (errs.length ? " — ⚠️ problemi con: " + errs.map(r => `${r.room} (${r.source}): ${r.error}`).join("; ") : " — tutto ok");
+    }
+    $("#syncStatusLine").textContent = line;
+    const realRooms = rooms.filter(r => !r.parking);
+    host.innerHTML = realRooms.map(r => {
+      const feeds = Array.isArray(r.feeds) ? r.feeds : [];
+      const urlOf = p => (feeds.find(f => f.portal === p.key) || {}).url || "";
+      const portals = PORTALS();
+      return `<div class="syncroom" data-id="${esc(r.id)}"><h3>${esc(r.name)}</h3>
+        <div class="sublabel">1. Link dei portali da incollare qui (calendario da esportare)</div>
+        ${portals.map(p => `<div class="feedrow"><span>${esc(p.key)}</span><input data-portal="${p.key}" value="${esc(urlOf(p))}" placeholder="https://… .ics"></div>`).join("")}
+        ${ok ? `<div class="sublabel">2. Link da incollare nei portali (calendario da importare)</div>
+        ${portals.map(p => { const u = `${syncCfg.url}?export=${encodeURIComponent(r.id)}&exclude=${encodeURIComponent(p.name)}&key=${encodeURIComponent(syncCfg.key)}`;
+          return `<div class="exportrow"><span style="width:64px">${esc(p.key)}</span><code title="${esc(u)}">${esc(u)}</code><button class="btn" data-copy="${esc(u)}">Copia</button></div>`; }).join("")}` : ""}
+      </div>`;
+    }).join("") || `<div style="color:var(--muted);font-size:13px">Aggiungi prima le camere.</div>`;
+  }
+  const syncMsg = (t, ok) => { const m = $("#syncMsg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); m.style.margin = "0"; };
+  $("#syncRooms").addEventListener("change", async e => {
+    const inp = e.target; if (!inp.dataset.portal || !db) return;
+    const id = inp.closest(".syncroom").dataset.id, r = rooms.find(x => x.id === id); if (!r) return;
+    const url = inp.value.trim();
+    if (url && !/^https:\/\//.test(url)){ syncMsg("Il link deve iniziare con https://"); return; }
+    const portal = PORTALS().find(p => p.key === inp.dataset.portal);
+    const feeds = (Array.isArray(r.feeds) ? r.feeds : []).filter(f => f.portal !== portal.key);
+    if (url) feeds.push({portal: portal.key, source: portal.name, url});
+    try { await db.collection("rooms").doc(id).update({feeds}); syncMsg(`Salvato (${r.name}, ${portal.key}).`, true); }
+    catch (err) { syncMsg(writeErr(err)); }
+  });
+  $("#syncRooms").addEventListener("click", async e => {
+    const u = e.target.dataset.copy; if (!u) return;
+    try { await navigator.clipboard.writeText(u); e.target.textContent = "Copiato ✓"; setTimeout(() => e.target.textContent = "Copia", 1500); }
+    catch { syncMsg("Copia non riuscita: tieni premuto sul link e copialo a mano."); }
+  });
+  $("#syncCfgSave").onclick = async () => {
+    if (!db) return;
+    const url = $("#syncUrl").value.trim().replace(/\/$/, ""), key = $("#syncKey").value.trim();
+    try { await db.doc("settings/sync").set({url, key}); syncMsg("Configurazione salvata.", true); } catch (err) { syncMsg(writeErr(err)); }
+  };
+  $("#syncNowBtn").onclick = async () => {
+    if (!syncCfg) return;
+    const btn = $("#syncNowBtn"); btn.disabled = true; syncMsg("Sincronizzazione in corso…", true);
+    try {
+      const r = await fetch(`${syncCfg.url}?sync=1&key=${encodeURIComponent(syncCfg.key)}`);
+      const j = await r.json();
+      const tot = (j.report || []).reduce((a, x) => ({added: a.added + (x.added||0), updated: a.updated + (x.updated||0), removed: a.removed + (x.removed||0), err: a.err + (x.ok ? 0 : 1)}), {added:0, updated:0, removed:0, err:0});
+      syncMsg(`Fatto: ${tot.added} nuove, ${tot.updated} aggiornate, ${tot.removed} cancellate${tot.err ? `, ${tot.err} link con problemi` : ""}.`, !tot.err);
+    } catch { syncMsg("Sincronizzazione non riuscita: controlla la connessione."); }
+    finally { btn.disabled = false; }
+  };
+
   function renderSettings(){
+    renderSync();
     const list = $("#roomList");
     list.innerHTML = rooms.map((r,i) => `<div class="r" data-id="${esc(r.id)}">
       <input value="${esc(r.name)}" data-act="name" aria-label="Nome camera">
@@ -1039,6 +1132,8 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
       rooms = snap.docs.map(d => ({id: d.id, ...d.data()})).sort((a,b) => (a.order||0) - (b.order||0) || a.name.localeCompare(b.name));
       gotRooms = true; maybeReady(snap.metadata.fromCache); render();
     }, onErr);
+    db.doc("settings/sync").onSnapshot(snap => { syncCfg = snap.exists ? snap.data() : null; if (view === "settings") renderSync(); }, () => {});
+    db.doc("settings/syncStatus").onSnapshot(snap => { syncStatus = snap.exists ? snap.data() : null; if (view === "settings") renderSync(); }, () => {});
     db.doc("settings/sources").onSnapshot(snap => {
       const l = snap.exists && snap.data().list;
       sources = Array.isArray(l) && l.length ? l : DEFAULT_SOURCES;
