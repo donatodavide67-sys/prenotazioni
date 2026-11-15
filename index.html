@@ -87,21 +87,26 @@
 
 <style>
 :root{
-  --bg:#f6f5f2; --panel:#fff; --ink:#1f2328; --muted:#6b7078; --line:#e3e1dc; --accent:#2f5d50;
-  --weekend:#efece6; --today:#fff4d6;
+  --bg:#f3f1ec; --panel:#fff; --ink:#1f2328; --muted:#6b7078; --line:#e6e3dd; --accent:#2f5d50;
+  --weekend:#f6f3ee; --today:#fff1c9;
   --diretta:#3b8a5a; --booking:#2b5fb4; --airbnb:#d9485f; --altro:#7a7f87; --blocco:#9aa0a6;
-  --cellW:44px; --roomW:96px; --rowH:46px;
+  --cellW:44px; --roomW:128px; --rowH:50px;
 }
 *{box-sizing:border-box}
 html,body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 button{font:inherit;cursor:pointer}
-header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;background:var(--panel);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:20}
+header{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:12px 14px;background:linear-gradient(180deg,#2f5d50,#284f44);color:#fff;position:sticky;top:0;z-index:20;box-shadow:0 2px 10px rgba(0,0,0,.12)}
+header .tabs{background:rgba(255,255,255,.14)}
+header .tabs button{color:rgba(255,255,255,.85)}
+header .tabs button.on{background:#fff;color:var(--ink)}
+header .btn.primary{background:#f2b84b;border-color:#f2b84b;color:#2b2207;font-weight:600}
 header h1{font-size:17px;margin:0 8px 0 0;font-weight:650}
 .tabs{display:flex;gap:4px;background:var(--bg);padding:3px;border-radius:9px}
 .tabs button{border:0;background:transparent;padding:6px 12px;border-radius:7px;color:var(--muted)}
 .tabs button.on{background:var(--panel);color:var(--ink);box-shadow:0 1px 2px rgba(0,0,0,.08)}
 .spacer{flex:1}
-.btn{border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:8px;color:var(--ink)}
+.btn{border:1px solid var(--line);background:var(--panel);padding:7px 12px;border-radius:10px;color:var(--ink);box-shadow:0 1px 1px rgba(0,0,0,.03)}
+.btn:hover{border-color:#cfcac2}
 .btn.primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .btn.danger{color:#b3261e;border-color:#f0c9c6}
 .btn:disabled{opacity:.5;cursor:default}
@@ -111,25 +116,29 @@ main{padding:12px 14px 40px;max-width:1400px;margin:0 auto}
 .nav{display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap}
 .nav .month{font-weight:600;margin-left:6px;text-transform:capitalize}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:12px;color:var(--muted);margin-left:auto}
-.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:5px;vertical-align:-1px;background:var(--c)}
+.legend span{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:3px 10px 3px 8px;color:var(--ink)}
+.legend span::before{content:"";display:inline-block;width:10px;height:10px;border-radius:50%;margin-right:6px;vertical-align:-1px;background:var(--c)}
 
 /* Calendar */
-.calwrap{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:10px;max-height:calc(100vh - 190px)}
+.calwrap{overflow:auto;background:var(--panel);border:1px solid var(--line);border-radius:14px;max-height:calc(100vh - 190px);box-shadow:0 2px 12px rgba(0,0,0,.05)}
 .cal{position:relative;display:grid;min-width:max-content}
 .cal .hrow,.cal .row{display:grid;grid-template-columns:var(--roomW) repeat(var(--days),var(--cellW))}
 .cal .hrow{position:sticky;top:0;z-index:6;background:var(--panel)}
-.cal .corner,.cal .rname{position:sticky;left:0;z-index:5;background:var(--panel);border-right:1px solid var(--line)}
+.cal .corner,.cal .rname{position:sticky;left:0;z-index:5;background:var(--panel);border-right:1px solid var(--line);box-shadow:2px 0 4px rgba(0,0,0,.03)}
 .cal .corner{z-index:7;border-bottom:1px solid var(--line)}
 .cal .dh{border-bottom:1px solid var(--line);border-left:1px solid var(--line);text-align:center;padding:4px 0;font-size:11px;color:var(--muted);line-height:1.2}
 .cal .dh b{display:block;font-size:14px;color:var(--ink)}
 .cal .dh.we{background:var(--weekend)} .cal .dh.td{background:var(--today)}
+.cal .dh.td b{background:var(--accent);color:#fff;border-radius:999px;width:24px;height:24px;line-height:24px;margin:1px auto 0}
 .cal .row{position:relative;height:var(--rowH)}
-.cal .rname{display:flex;align-items:center;padding:0 10px;font-weight:600;font-size:14px;border-bottom:1px solid var(--line);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.cal .rname{display:flex;align-items:center;padding:0 8px 0 10px;font-weight:600;font-size:13px;line-height:1.2;border-bottom:1px solid var(--line);overflow:hidden}
+.cal .rname span{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:break-word;hyphens:manual}
 .cal .cell{border-left:1px solid var(--line);border-bottom:1px solid var(--line)}
 .cal .cell.we{background:var(--weekend)} .cal .cell.td{background:var(--today)}
 .cal .cell:hover{background:#e9f1ee}
-.bar{position:absolute;top:7px;height:calc(var(--rowH) - 14px);border-radius:7px;color:#fff;font-size:12px;padding:3px 8px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;z-index:3;box-shadow:0 1px 2px rgba(0,0,0,.15);line-height:1.15;display:flex;flex-direction:column;justify-content:center;border:0;text-align:left}
-.bar small{opacity:.85;font-size:10.5px}
+.bar{position:absolute;top:7px;height:calc(var(--rowH) - 14px);border-radius:9px;color:#fff;font-size:12.5px;font-weight:600;padding:3px 9px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis;cursor:pointer;z-index:3;box-shadow:0 1px 3px rgba(0,0,0,.18),inset 0 -2px 0 rgba(0,0,0,.08);line-height:1.15;display:flex;flex-direction:column;justify-content:center;border:0;text-align:left;transition:transform .08s,box-shadow .08s}
+.bar:hover{transform:translateY(-1px);box-shadow:0 3px 8px rgba(0,0,0,.22)}
+.bar small{opacity:.85;font-size:10.5px;font-weight:500}
 .bar.cut-l{border-top-left-radius:0;border-bottom-left-radius:0}
 .bar.cut-r{border-top-right-radius:0;border-bottom-right-radius:0}
 .bar.conflict{outline:2px solid #ffb300;outline-offset:1px}
@@ -213,7 +222,12 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
 .nights{font-size:13px;color:var(--muted);margin:-4px 0 10px}
 
 @media(max-width:600px){
-  :root{--cellW:38px;--roomW:78px;--rowH:44px}
+  :root{--cellW:38px;--roomW:104px;--rowH:52px}
+  .cal .rname{font-size:11.5px;padding:0 5px 0 8px}
+  header{padding:8px 10px;gap:8px}
+  header .tabs button{padding:5px 9px;font-size:13px}
+  header .btn.primary{padding:6px 10px;font-size:14px}
+  .nav input[type=date]{max-width:150px}
   header h1{font-size:15px}
   .grid2{grid-template-columns:1fr}
   .legend{margin-left:0;width:100%}
@@ -289,8 +303,9 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
 
     <div class="section">
       <h2>Provenienze e colori</h2>
-      <p class="hint">Le voci che scegli in ogni prenotazione, ognuna con il suo colore. Puoi rinominarle, cambiare colore, aggiungerne o toglierne. Se rinomini una voce, le prenotazioni che la usano si aggiornano da sole. "Chiusa" serve per bloccare una camera senza ospite.</p>
+      <p class="hint">Le voci che scegli in ogni prenotazione, ognuna con il suo colore. Puoi rinominarle, cambiare colore, aggiungerne o toglierne. Se rinomini una voce, le prenotazioni che la usano si aggiornano da sole. "Chiusa" serve per bloccare una camera senza ospite. Le voci con 🔒 servono alla sincronizzazione con i portali: puoi cambiarne il colore ma non il nome.</p>
       <div class="roomlist" id="srcList"></div>
+      <div class="roomlist"><div class="r"><input type="color" id="paidColor" aria-label="Colore prenotazioni Booking incassate"><span style="flex:1">💰 Booking con soldi incassati</span></div></div>
       <div class="inline">
         <input id="newSrcName" placeholder="Nuova voce (es. Expedia, Amici, Pulizie…)" style="flex:1;min-width:180px">
         <input type="color" id="newSrcColor" value="#8e44ad" style="width:52px;padding:2px">
@@ -377,6 +392,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
       <div class="field"><label>Prezzo totale (€)</label><input type="number" id="fPrice" min="0" step="0.01" inputmode="decimal"></div>
       <div class="field"><label>Acconto ricevuto (€)</label><input type="number" id="fDeposit" min="0" step="0.01" inputmode="decimal"></div>
     </div>
+    <label class="check" id="fPaidRow" style="margin:0 0 12px"><input type="checkbox" id="fPaid" style="width:auto;margin-top:2px"> <span>💰 Soldi già incassati <span style="color:var(--muted)">(la barra diventa viola)</span></span></label>
     <div class="field"><label>Note</label><textarea id="fNotes"></textarea></div>
     <div class="warnbox" id="fWarn"></div>
     <div class="msg err" id="fErr"></div>
@@ -402,10 +418,14 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
   const fmtDay = k => fromKey(k).toLocaleDateString("it-IT", {weekday:"short", day:"numeric", month:"short", timeZone:"UTC"});
   const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
   const DEFAULT_SOURCES = [
-    {name:"Diretta", color:"#3b8a5a"}, {name:"Booking", color:"#2b5fb4"}, {name:"Airbnb", color:"#d9485f"},
+    {name:"Booking", color:"#e03a3e"}, {name:"Diretti", color:"#3fa7e8"}, {name:"Comunicazioni", color:"#9fdc9b"},
     {name:"Altro", color:"#7a7f87"}, {name:"Chiusa", color:"#9aa0a6"}];
-  let sources = DEFAULT_SOURCES;
+  let sources = DEFAULT_SOURCES, paidColor = "#8e5bd6";
   const colorOf = name => (sources.find(s => s.name === name) || {}).color || "#7a7f87";
+  const isBookingSrc = n => /booking/i.test(n || "");
+  const barColor = b => (b.paid && isBookingSrc(b.source)) ? paidColor : colorOf(b.source);
+  // nomi usati dalla sincronizzazione: non si possono rinominare o eliminare
+  const syncSources = () => new Set(rooms.flatMap(r => (r.feeds || []).map(f => f.source)).concat(bookings.filter(b => b.imported).map(b => b.source)));
   const inkOn = hex => { const m = /^#?([0-9a-f]{6})$/i.exec(hex || ""); if (!m) return "#fff";
     const n = parseInt(m[1], 16), r = n>>16, g = (n>>8)&255, b = n&255; return (0.299*r + 0.587*g + 0.114*b) > 160 ? "#1f2328" : "#fff"; };
   const hash = s => { let h = 2166136261; for (let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); } return (h>>>0).toString(36); };
@@ -445,6 +465,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     return ids;
   }
 
+  const shortName = n => String(n || "").replace(/^camera\s+/i, "");
   function renderCal(){
     const host = $("#calHost");
     const end = addDays(start, DAYS);
@@ -484,7 +505,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
         laneOf[b.id] = l;
       }
       const H = Math.max(1, laneEnds.length) * rh;
-      html += `<div class="row${r.parking ? " park" : ""}" style="height:${H}px"><div class="rname" title="${esc(r.name)}">${r.parking ? "📦 " : ""}${esc(r.name)}</div>`;
+      html += `<div class="row${r.parking ? " park" : ""}" style="height:${H}px"><div class="rname" title="${esc(r.name)}"><span>${r.parking ? "📦 " : ""}${esc(shortName(r.name))}</span></div>`;
       for (const k of days) html += `<div class="cell${cls(k)}" data-room="${esc(r.id)}" data-day="${k}"></div>`;
       for (const b of rb){
         const s = diffDays(start, b.checkin), e = diffDays(start, b.checkout);
@@ -494,7 +515,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
         const width = Math.max(right - left - 2, 14);
         const nights = diffDays(b.checkin, b.checkout);
         const label = b.guest || (b.source === "Chiusa" ? "Chiusa" : b.source);
-        html += `<button type="button" class="bar${moving && moving.id === b.id ? " picked" : ""}${cutL?" cut-l":""}${cutR?" cut-r":""}${conf.has(b.id)?" conflict":""}" data-id="${esc(b.id)}" style="left:${left+1}px;width:${width}px;top:${laneOf[b.id]*rh + 7}px;background:${colorOf(b.source)};color:${inkOn(colorOf(b.source))}" title="${esc(label)} · ${fmtDay(b.checkin)} → ${fmtDay(b.checkout)}${conf.has(b.id)?" · ATTENZIONE: sovrapposta":""}">${esc(label)}<small>${nights} nott${nights===1?"e":"i"}${b.pax?" · "+b.pax+" pers.":""}</small></button>`;
+        html += `<button type="button" class="bar${moving && moving.id === b.id ? " picked" : ""}${cutL?" cut-l":""}${cutR?" cut-r":""}${conf.has(b.id)?" conflict":""}" data-id="${esc(b.id)}" style="left:${left+1}px;width:${width}px;top:${laneOf[b.id]*rh + 7}px;background:${barColor(b)};color:${inkOn(barColor(b))}" title="${esc(label)}${b.paid && isBookingSrc(b.source) ? " · incassata" : ""} · ${fmtDay(b.checkin)} → ${fmtDay(b.checkout)}${conf.has(b.id)?" · ATTENZIONE: sovrapposta":""}">${b.paid && isBookingSrc(b.source) ? "💰 " : ""}${esc(label)}<small>${nights} nott${nights===1?"e":"i"}${b.pax?" · "+b.pax+" pers.":""}</small></button>`;
       }
       html += `</div>`;
     }
@@ -523,7 +544,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     const host = $("#view-list");
     const tk = todayKey(), tm = addDays(tk,1);
     const sorted = [...bookings].filter(b => b.source !== "Chiusa");
-    const item = (b, when) => `<div class="item" data-id="${esc(b.id)}"><span class="dot" style="background:${colorOf(b.source)}"></span><div class="grow"><div><b>${esc(b.guest || b.source)}</b> · ${esc(roomName(b.room))}</div><div class="meta">${when}${b.pax?" · "+b.pax+" pers.":""}${b.phone?" · "+esc(b.phone):""}${b.price? " · "+money(b.price):""}</div></div></div>`;
+    const item = (b, when) => `<div class="item" data-id="${esc(b.id)}"><span class="dot" style="background:${barColor(b)}"></span><div class="grow"><div><b>${esc(b.guest || b.source)}</b> · ${esc(roomName(b.room))}</div><div class="meta">${when}${b.pax?" · "+b.pax+" pers.":""}${b.phone?" · "+esc(b.phone):""}${b.price? " · "+money(b.price):""}</div></div></div>`;
     const block = (title, list, whenFn) => `<div class="card"><h3>${title} (${list.length})</h3>${list.length ? list.map(b => item(b, whenFn(b))).join("") : `<div class="meta" style="color:var(--muted);font-size:13px">Nessuno</div>`}</div>`;
     const arrToday = sorted.filter(b => b.checkin === tk);
     const depToday = sorted.filter(b => b.checkout === tk);
@@ -568,7 +589,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
         <div class="sublabel">1. Link dei portali da incollare qui (calendario da esportare)</div>
         ${portals.map(p => `<div class="feedrow"><span>${esc(p.key)}</span><input data-portal="${p.key}" value="${esc(urlOf(p))}" placeholder="https://… .ics"></div>`).join("")}
         ${ok ? `<div class="sublabel">2. Link da incollare nei portali (calendario da importare)</div>
-        ${portals.map(p => { const u = `${syncCfg.url}?export=${encodeURIComponent(r.id)}&exclude=${encodeURIComponent(p.name)}&key=${encodeURIComponent(syncCfg.key)}`;
+        ${portals.map(p => { const u = `${syncCfg.url}/ics/${encodeURIComponent(syncCfg.key)}/${encodeURIComponent(r.id)}/${encodeURIComponent(p.name)}.ics`;
           return `<div class="exportrow"><span style="width:64px">${esc(p.key)}</span><code title="${esc(u)}">${esc(u)}</code><button class="btn" data-copy="${esc(u)}">Copia</button></div>`; }).join("")}` : ""}
       </div>`;
     }).join("") || `<div style="color:var(--muted);font-size:13px">Aggiungi prima le camere.</div>`;
@@ -620,9 +641,11 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     sel.innerHTML = rooms.map(r => `<option value="${esc(r.id)}">${esc(r.name)}</option>`).join("");
     if (cur) sel.value = cur;
     const used = n => bookings.filter(b => b.source === n).length;
+    const locked = syncSources();
+    if (!$("#paidColor").matches(":focus")) $("#paidColor").value = paidColor;
     if (!$("#srcList").contains(document.activeElement)) $("#srcList").innerHTML = sources.map((s,i) => `<div class="r src" data-i="${i}">
       <input type="color" value="${esc(s.color)}" data-act="color" aria-label="Colore">
-      <input type="text" value="${esc(s.name)}" data-act="sname" aria-label="Nome voce">
+      <input type="text" value="${esc(s.name)}" data-act="sname" aria-label="Nome voce" ${locked.has(s.name) ? 'disabled title="Usata dalla sincronizzazione"' : ""}>${locked.has(s.name) ? "🔒" : ""}
       <span style="font-size:12px;color:var(--muted);white-space:nowrap">${used(s.name)} pren.</span>
       <button class="btn" data-act="sup" ${i===0?"disabled":""} aria-label="Su">↑</button>
       <button class="btn danger" data-act="sdel" aria-label="Elimina">✕</button></div>`).join("");
@@ -631,7 +654,9 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     if (icur) isel.value = icur;
   }
   function renderLegend(){
-    $("#legend").innerHTML = sources.map(s => `<span style="--c:${esc(s.color)}">${esc(s.name)}</span>`).join("");
+    const bk = sources.find(s => isBookingSrc(s.name));
+    $("#legend").innerHTML = sources.map(s => `<span style="--c:${esc(s.color)}">${esc(s.name)}</span>`).join("") +
+      (bk ? `<span style="--c:${esc(paidColor)}">${esc(bk.name)} incassata</span>` : "");
   }
 
   // ---------- trascina e rilascia ----------
@@ -781,6 +806,8 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     $("#fPrice").value = p.price ?? "";
     $("#fDeposit").value = p.deposit ?? "";
     $("#fNotes").value = p.notes || "";
+    $("#fPaid").checked = !!p.paid;
+    $("#fPaidRow").hidden = !isBookingSrc($("#fSource").value);
     $("#fDelete").hidden = !b;
     $("#fMove").hidden = !b;
     $("#fDelete").textContent = "Elimina";
@@ -793,6 +820,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
   }
   function closeForm(){ ov.classList.remove("on"); editingId = null; }
   $("#fCancel").onclick = closeForm;
+  $("#fSource").addEventListener("change", () => { $("#fPaidRow").hidden = !isBookingSrc($("#fSource").value); });
   ov.addEventListener("click", e => { if (e.target === ov) closeForm(); });
   document.addEventListener("keydown", e => { if (e.key === "Escape" && ov.classList.contains("on")) closeForm(); });
   $("#newBtn").onclick = () => openForm(null);
@@ -812,11 +840,13 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
       price: num($("#fPrice").value),
       deposit: num($("#fDeposit").value),
       notes: $("#fNotes").value.trim(),
+      paid: isBookingSrc($("#fSource").value) && $("#fPaid").checked,
       updatedAt: new Date().toISOString()
     };
     if (!data.checkin || !data.checkout || data.checkout <= data.checkin){ $("#fErr").textContent = "La partenza deve essere dopo l'arrivo."; return; }
     const old = editingId ? bookings.find(b => b.id === editingId) : null;
     if (old && old.icsUid){ data.icsUid = old.icsUid; data.imported = old.imported; }
+    if (old && old.movedManually) data.movedManually = true;
     $("#fSave").disabled = true;
     try {
       const ref = editingId ? db.collection("bookings").doc(editingId) : db.collection("bookings").doc();
@@ -890,7 +920,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
   // ---------- provenienze ----------
   const srcMsg = (t, ok) => { const m = $("#srcMsg"); m.textContent = t; m.className = "msg " + (ok ? "ok" : "err"); };
   async function saveSources(list){
-    await db.doc("settings/sources").set({list});
+    await db.doc("settings/sources").set({list, paidColor});
     sources = list; render();
   }
   $("#addSrcBtn").onclick = async () => {
@@ -899,6 +929,10 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     try { await saveSources([...sources, {name, color: $("#newSrcColor").value}]); $("#newSrcName").value = ""; srcMsg("", true); }
     catch (e) { srcMsg(writeErr(e)); }
   };
+  $("#paidColor").addEventListener("change", async e => {
+    if (!db) return; paidColor = e.target.value;
+    try { await db.doc("settings/sources").set({list: sources, paidColor}); render(); } catch (err) { srcMsg(writeErr(err)); }
+  });
   $("#newSrcName").addEventListener("keydown", e => { if (e.key === "Enter") $("#addSrcBtn").click(); });
   $("#srcList").addEventListener("change", async e => {
     const row = e.target.closest(".r"); if (!row || !db) return;
@@ -924,6 +958,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
       if (act === "sup" && i > 0){ [list[i-1], list[i]] = [list[i], list[i-1]]; await saveSources(list); }
       else if (act === "sdel"){
         if (list.length <= 1) return srcMsg("Serve almeno una voce.");
+        if (syncSources().has(list[i].name)) return srcMsg("Questa voce serve alla sincronizzazione con i portali: non si può eliminare.");
         const n = bookings.filter(b => b.source === list[i].name).length;
         if (!e.target.dataset.armed){ e.target.dataset.armed = "1"; e.target.textContent = n ? `Elimina? (${n} pren. diventano grigie)` : "Conferma"; return; }
         list.splice(i, 1); await saveSources(list);
@@ -1137,6 +1172,7 @@ label{display:block;font-size:12.5px;color:var(--muted);margin:0 0 4px}
     db.doc("settings/sources").onSnapshot(snap => {
       const l = snap.exists && snap.data().list;
       sources = Array.isArray(l) && l.length ? l : DEFAULT_SOURCES;
+      if (snap.exists && snap.data().paidColor) paidColor = snap.data().paidColor;
       render();
     }, () => {});
     db.collection("bookings").onSnapshot(snap => {
